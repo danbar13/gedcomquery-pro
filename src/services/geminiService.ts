@@ -20,7 +20,7 @@ export interface ModelTestResult {
 
 export function isViableTextModel(id: string): boolean {
   const lower = id.toLowerCase();
-  // Strictly exclude non-chat/specialized models that have 0 quota on free tier (like -tts, audio, imagen, embed)
+  // Strictly exclude non-chat/specialized models that have 0 quota or are deprecated for new users
   if (
     lower.includes('tts') ||
     lower.includes('audio') ||
@@ -34,7 +34,9 @@ export function isViableTextModel(id: string): boolean {
     lower.includes('gecko') ||
     lower.includes('medlm') ||
     lower.includes('computer-use') ||
-    lower.includes('deep-research')
+    lower.includes('deep-research') ||
+    lower.includes('2.5-flash-lite') || // Deprecated by Google: "no longer available to new users"
+    lower.includes('flash-lite')
   ) {
     return false;
   }
@@ -44,27 +46,26 @@ export function isViableTextModel(id: string): boolean {
 export function getModelPriorityScore(id: string): number {
   const lower = id.toLowerCase();
 
-  // Tier 1: Gemini 2.0 Flash (highest free tier quota: 15 RPM, 1500 RPD, fast)
+  // Tier 1: Gemini 2.5 Flash (Google's official recommendation for all new users)
+  if (lower === 'gemini-2.5-flash') return 120;
+  if (lower.startsWith('gemini-2.5-flash-001') || lower.startsWith('gemini-2.5-flash-preview')) return 115;
+  if (lower.includes('2.5-flash') && !lower.includes('lite') && !lower.includes('tts')) return 110;
+
+  // Tier 2: Gemini 2.0 Flash (Top free tier: 15 RPM, 1500 RPD, fast)
   if (lower === 'gemini-2.0-flash') return 100;
   if (lower.startsWith('gemini-2.0-flash-001')) return 98;
-  if (lower === 'gemini-2.0-flash-lite' || lower.includes('2.0-flash-lite')) return 95;
-  if (lower === 'gemini-2.0-flash-exp') return 90;
+  if (lower === 'gemini-2.0-flash-exp') return 95;
 
-  // Tier 2: Gemini 1.5 Flash (very high free quota: 15 RPM, 1500 RPD, ultra stable)
-  if (lower === 'gemini-1.5-flash') return 85;
-  if (lower.startsWith('gemini-1.5-flash-001') || lower.startsWith('gemini-1.5-flash-002')) return 84;
-  if (lower === 'gemini-1.5-flash-latest') return 83;
-  if (lower.includes('1.5-flash-8b')) return 80;
-  if (lower.includes('1.5-flash')) return 78;
+  // Tier 3: Gemini 2.5 Pro (standard text only)
+  if (lower === 'gemini-2.5-pro' && !lower.includes('tts')) return 90;
 
-  // Tier 3: Gemini 1.5 Pro
-  if (lower === 'gemini-1.5-pro') return 70;
-  if (lower.startsWith('gemini-1.5-pro-')) return 68;
-  if (lower.includes('1.5-pro')) return 65;
+  // Tier 4: Gemini 1.5 Flash
+  if (lower === 'gemini-1.5-flash') return 80;
+  if (lower.startsWith('gemini-1.5-flash-001') || lower.startsWith('gemini-1.5-flash-002')) return 78;
+  if (lower === 'gemini-1.5-flash-latest') return 75;
 
-  // Tier 4: Gemini 2.5 models only if standard text (not tts/preview with limit 0)
-  if (lower === 'gemini-2.5-flash') return 60;
-  if (lower === 'gemini-2.5-pro') return 50;
+  // Tier 5: Gemini 1.5 Pro
+  if (lower === 'gemini-1.5-pro') return 60;
 
   if (lower.includes('flash')) return 40;
   if (lower.includes('pro')) return 30;
@@ -81,11 +82,11 @@ export function setStoredApiKey(key: string): void {
 }
 
 export function getStoredModel(): string {
-  const model = localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.0-flash';
-  // Sanitize any previously saved unsupported/tts models
-  if (!isViableTextModel(model) || model.toLowerCase().includes('tts')) {
-    localStorage.setItem(MODEL_STORAGE_KEY, 'gemini-2.0-flash');
-    return 'gemini-2.0-flash';
+  const model = localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.5-flash';
+  // Sanitize any previously saved unsupported/tts/lite models
+  if (!isViableTextModel(model) || model.toLowerCase().includes('tts') || model.toLowerCase().includes('lite')) {
+    localStorage.setItem(MODEL_STORAGE_KEY, 'gemini-2.5-flash');
+    return 'gemini-2.5-flash';
   }
   return model;
 }
@@ -207,17 +208,18 @@ export async function researchIndividual(
   }
 
   const safeFallbacks = [
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
+    'gemini-2.5-pro',
     'gemini-1.5-flash',
     'gemini-1.5-flash-8b',
-    'gemini-2.0-flash-lite',
     'gemini-1.5-pro',
   ];
 
+  const activeModel = isViableTextModel(currentModel) ? currentModel : 'gemini-2.5-flash';
+
   // Check models dynamically from Google
-  let candidateModels: string[] = isViableTextModel(currentModel)
-    ? [currentModel, ...safeFallbacks]
-    : safeFallbacks;
+  let candidateModels: string[] = [activeModel, ...safeFallbacks];
 
   try {
     const listResult = await testAndListModels(apiKey);
@@ -244,7 +246,7 @@ export async function researchIndividual(
 
       candidateModels = Array.from(
         new Set([
-          ...(isViableTextModel(currentModel) ? [currentModel] : []),
+          activeModel,
           ...viableIds,
           ...safeFallbacks,
         ])

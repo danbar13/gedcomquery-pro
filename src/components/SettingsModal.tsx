@@ -38,7 +38,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-2.0-flash');
+  const [model, setModel] = useState('gemini-2.5-flash');
   const [saved, setSaved] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<{
@@ -50,9 +50,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     setApiKey(getStoredApiKey());
     const stored = getStoredModel();
-    if (!isViableTextModel(stored)) {
-      setModel('gemini-2.0-flash');
-      setStoredModel('gemini-2.0-flash');
+    if (!isViableTextModel(stored) || stored.includes('lite')) {
+      setModel('gemini-2.5-flash');
+      setStoredModel('gemini-2.5-flash');
     } else {
       setModel(stored);
     }
@@ -83,11 +83,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         // Auto select best model if current not in list or not viable
         const ids = viable.map((m) => m.id);
-        if (!ids.includes(model) || !isViableTextModel(model)) {
+        if (!ids.includes(model) || !isViableTextModel(model) || model.includes('lite')) {
           const nextModel =
             res.bestModel && ids.includes(res.bestModel)
               ? res.bestModel
-              : viable[0]?.id || 'gemini-2.0-flash';
+              : viable[0]?.id || 'gemini-2.5-flash';
           setModel(nextModel);
           setStoredModel(nextModel);
         }
@@ -240,20 +240,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {dynamicModels.length > 0 ? (
                 dynamicModels.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.id === 'gemini-2.0-flash'
-                      ? '⭐ Gemini 2.0 Flash (מומלץ ביותר - חינמי, מהיר ותומך חיפוש רשת)'
+                    {m.id === 'gemini-2.5-flash'
+                      ? '⭐ Gemini 2.5 Flash (מומלץ ע"י Google - מהיר, חינמי ועדכני)'
+                      : m.id === 'gemini-2.0-flash'
+                      ? 'Gemini 2.0 Flash (מהיר, חינמי ויציב)'
+                      : m.id === 'gemini-2.5-pro'
+                      ? 'Gemini 2.5 Pro (הסקה עמוקה ומתקדמת)'
                       : m.id.includes('1.5-flash')
-                      ? `Gemini 1.5 Flash (${m.id}) - מכסה חינמית גבוהה`
-                      : m.id === 'gemini-2.0-flash-lite'
-                      ? 'Gemini 2.0 Flash-Lite (מכסה גבוהה מאוד)'
+                      ? `Gemini 1.5 Flash (${m.id})`
                       : `${m.displayName || m.id} (${m.id})`}
                   </option>
                 ))
               ) : (
                 <>
-                  <option value="gemini-2.0-flash">⭐ Gemini 2.0 Flash (מומלץ ביותר - חינמי, מהיר ותומך חיפוש רשת)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (יציב, מכסה חינמית גבוהה)</option>
-                  <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B (מהיר וקל משקל)</option>
+                  <option value="gemini-2.5-flash">⭐ Gemini 2.5 Flash (מומלץ ע"י Google - מהיר, חינמי ועדכני)</option>
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (מהיר, חינמי ויציב)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (הסקה עמוקה)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (יציב, מכסה חינמית)</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro (הסקה עמוקה ומורכבת)</option>
                 </>
               )}
