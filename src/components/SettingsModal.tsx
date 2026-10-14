@@ -18,6 +18,7 @@ import {
   getStoredModel,
   setStoredModel,
   testAndListModels,
+  isViableTextModel,
   AvailableModel,
 } from '../services/geminiService';
 import { useLanguage } from '../context/LanguageContext';
@@ -48,7 +49,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     setApiKey(getStoredApiKey());
-    setModel(getStoredModel());
+    const stored = getStoredModel();
+    if (!isViableTextModel(stored)) {
+      setModel('gemini-2.0-flash');
+      setStoredModel('gemini-2.0-flash');
+    } else {
+      setModel(stored);
+    }
     setTestStatus(null);
   }, [isOpen]);
 
@@ -67,16 +74,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const res = await testAndListModels(apiKey);
       if (res.success && res.models.length > 0) {
-        setDynamicModels(res.models);
+        const viable = res.models.filter((m) => isViableTextModel(m.id));
+        setDynamicModels(viable);
         setTestStatus({
           type: 'success',
-          message: t.apiKeyValid(res.models.length),
+          message: t.apiKeyValid(viable.length),
         });
 
-        // Auto select best model if current not in list
-        const ids = res.models.map((m) => m.id);
-        if (!ids.includes(model) && res.bestModel) {
-          setModel(res.bestModel);
+        // Auto select best model if current not in list or not viable
+        const ids = viable.map((m) => m.id);
+        if (!ids.includes(model) || !isViableTextModel(model)) {
+          const nextModel =
+            res.bestModel && ids.includes(res.bestModel)
+              ? res.bestModel
+              : viable[0]?.id || 'gemini-2.0-flash';
+          setModel(nextModel);
+          setStoredModel(nextModel);
         }
       } else {
         setTestStatus({
@@ -227,14 +240,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {dynamicModels.length > 0 ? (
                 dynamicModels.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.displayName} ({m.id})
+                    {m.id === 'gemini-2.0-flash'
+                      ? '⭐ Gemini 2.0 Flash (מומלץ ביותר - חינמי, מהיר ותומך חיפוש רשת)'
+                      : m.id.includes('1.5-flash')
+                      ? `Gemini 1.5 Flash (${m.id}) - מכסה חינמית גבוהה`
+                      : m.id === 'gemini-2.0-flash-lite'
+                      ? 'Gemini 2.0 Flash-Lite (מכסה גבוהה מאוד)'
+                      : `${m.displayName || m.id} (${m.id})`}
                   </option>
                 ))
               ) : (
                 <>
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (מומלץ - מהיר עם חיפוש רשת חי)</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (דגם מתקדם ומהיר)</option>
-                  <option value="gemini-1.5-flash-latest">Gemini 1.5 Flash Latest (יציב ויעיל)</option>
+                  <option value="gemini-2.0-flash">⭐ Gemini 2.0 Flash (מומלץ ביותר - חינמי, מהיר ותומך חיפוש רשת)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (יציב, מכסה חינמית גבוהה)</option>
+                  <option value="gemini-1.5-flash-8b">Gemini 1.5 Flash-8B (מהיר וקל משקל)</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro (הסקה עמוקה ומורכבת)</option>
                 </>
               )}

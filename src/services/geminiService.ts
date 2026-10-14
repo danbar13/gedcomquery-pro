@@ -18,6 +18,60 @@ export interface ModelTestResult {
   error?: string;
 }
 
+export function isViableTextModel(id: string): boolean {
+  const lower = id.toLowerCase();
+  // Strictly exclude non-chat/specialized models that have 0 quota on free tier (like -tts, audio, imagen, embed)
+  if (
+    lower.includes('tts') ||
+    lower.includes('audio') ||
+    lower.includes('embed') ||
+    lower.includes('imagen') ||
+    lower.includes('image') ||
+    lower.includes('realtime') ||
+    lower.includes('transcription') ||
+    lower.includes('robotics') ||
+    lower.includes('bison') ||
+    lower.includes('gecko') ||
+    lower.includes('medlm') ||
+    lower.includes('computer-use') ||
+    lower.includes('deep-research')
+  ) {
+    return false;
+  }
+  return lower.startsWith('gemini');
+}
+
+export function getModelPriorityScore(id: string): number {
+  const lower = id.toLowerCase();
+
+  // Tier 1: Gemini 2.0 Flash (highest free tier quota: 15 RPM, 1500 RPD, fast)
+  if (lower === 'gemini-2.0-flash') return 100;
+  if (lower.startsWith('gemini-2.0-flash-001')) return 98;
+  if (lower === 'gemini-2.0-flash-lite' || lower.includes('2.0-flash-lite')) return 95;
+  if (lower === 'gemini-2.0-flash-exp') return 90;
+
+  // Tier 2: Gemini 1.5 Flash (very high free quota: 15 RPM, 1500 RPD, ultra stable)
+  if (lower === 'gemini-1.5-flash') return 85;
+  if (lower.startsWith('gemini-1.5-flash-001') || lower.startsWith('gemini-1.5-flash-002')) return 84;
+  if (lower === 'gemini-1.5-flash-latest') return 83;
+  if (lower.includes('1.5-flash-8b')) return 80;
+  if (lower.includes('1.5-flash')) return 78;
+
+  // Tier 3: Gemini 1.5 Pro
+  if (lower === 'gemini-1.5-pro') return 70;
+  if (lower.startsWith('gemini-1.5-pro-')) return 68;
+  if (lower.includes('1.5-pro')) return 65;
+
+  // Tier 4: Gemini 2.5 models only if standard text (not tts/preview with limit 0)
+  if (lower === 'gemini-2.5-flash') return 60;
+  if (lower === 'gemini-2.5-pro') return 50;
+
+  if (lower.includes('flash')) return 40;
+  if (lower.includes('pro')) return 30;
+
+  return 10;
+}
+
 export function getStoredApiKey(): string {
   return localStorage.getItem(API_KEY_STORAGE_KEY) || '';
 }
@@ -27,12 +81,20 @@ export function setStoredApiKey(key: string): void {
 }
 
 export function getStoredModel(): string {
-  return localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.0-flash';
+  const model = localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.0-flash';
+  // Sanitize any previously saved unsupported/tts models
+  if (!isViableTextModel(model) || model.toLowerCase().includes('tts')) {
+    localStorage.setItem(MODEL_STORAGE_KEY, 'gemini-2.0-flash');
+    return 'gemini-2.0-flash';
+  }
+  return model;
 }
 
 export function setStoredModel(model: string): void {
   const clean = model.replace(/^models\//, '').trim();
-  localStorage.setItem(MODEL_STORAGE_KEY, clean);
+  if (isViableTextModel(clean)) {
+    localStorage.setItem(MODEL_STORAGE_KEY, clean);
+  }
 }
 
 /**
@@ -80,35 +142,12 @@ export async function testAndListModels(apiKey: string): Promise<ModelTestResult
               displayName: m.displayName || cleanId,
               description: m.description,
             };
-          });
+          })
+          .filter((m) => isViableTextModel(m.id))
+          .sort((a, b) => getModelPriorityScore(b.id) - getModelPriorityScore(a.id));
 
         if (supported.length > 0) {
-          const preferredCandidates = [
-            'gemini-2.5-flash',
-            'gemini-2.0-flash',
-            'gemini-2.0-flash-exp',
-            'gemini-1.5-flash-latest',
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-          ];
-
-          let best = supported.find((m) => preferredCandidates.includes(m.id))?.id;
-          if (!best) {
-            best =
-              supported.find(
-                (m) =>
-                  m.id.includes('flash') &&
-                  !m.id.includes('image') &&
-                  !m.id.includes('embed')
-              )?.id ||
-              supported.find(
-                (m) =>
-                  m.id.includes('pro') &&
-                  !m.id.includes('image') &&
-                  !m.id.includes('embed')
-              )?.id ||
-              supported[0].id;
-          }
+          const best = supported[0].id;
 
           return {
             success: true,
@@ -167,8 +206,19 @@ export async function researchIndividual(
     return generateSimulatedDiscovery(indi, queries, parents, spouses);
   }
 
+  const safeFallbacks = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-pro',
+  ];
+
   // Check models dynamically from Google
-  let candidateModels: string[] = [currentModel];
+  let candidateModels: string[] = isViableTextModel(currentModel)
+    ? [currentModel, ...safeFallbacks]
+    : safeFallbacks;
+
   try {
     const listResult = await testAndListModels(apiKey);
     if (!listResult.success && listResult.error?.includes('API key not valid')) {
@@ -187,25 +237,27 @@ export async function researchIndividual(
     }
 
     if (listResult.success && listResult.models.length > 0) {
-      const availableIds = listResult.models.map((m) => m.id);
-      if (availableIds.includes(currentModel)) {
-        candidateModels = [currentModel, ...availableIds.filter((id) => id !== currentModel)];
-      } else if (listResult.bestModel) {
-        candidateModels = [listResult.bestModel, ...availableIds.filter((id) => id !== listResult.bestModel)];
-      } else {
-        candidateModels = availableIds;
-      }
+      const viableIds = listResult.models
+        .map((m) => m.id)
+        .filter(isViableTextModel)
+        .sort((a, b) => getModelPriorityScore(b) - getModelPriorityScore(a));
+
+      candidateModels = Array.from(
+        new Set([
+          ...(isViableTextModel(currentModel) ? [currentModel] : []),
+          ...viableIds,
+          ...safeFallbacks,
+        ])
+      );
     }
   } catch (testErr) {
     console.warn('Could not test models, continuing with fallback candidate list:', testErr);
-    candidateModels = [
-      currentModel,
-      'gemini-2.0-flash',
-      'gemini-2.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro',
-    ];
+  }
+
+  // Ensure candidate models are viable
+  candidateModels = candidateModels.filter(isViableTextModel);
+  if (candidateModels.length === 0) {
+    candidateModels = safeFallbacks;
   }
 
   // Live call to Gemini API with Google Search Grounding
@@ -257,8 +309,8 @@ export async function researchIndividual(
     let response: Response | null = null;
     let successfulModel = '';
 
-    // Iterate through top candidates
-    for (const testModel of candidateModels.slice(0, 4)) {
+    // Iterate through top viable candidates (up to 5 attempts)
+    for (const testModel of candidateModels.slice(0, 5)) {
       const cleanModel = testModel.replace(/^models\//, '');
       const endpointV1beta = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
@@ -272,7 +324,7 @@ export async function researchIndividual(
         }),
       });
 
-      // If 400 (grounding tool rejected on this key/project), retry without tool
+      // If 400 (grounding tool rejected on this key/tier/model), retry without tool
       if (!res.ok && res.status === 400) {
         console.warn(`Model ${cleanModel} returned 400 with google_search tool, retrying without tool...`);
         res = await fetch(endpointV1beta, {
@@ -310,18 +362,22 @@ export async function researchIndividual(
           lastResponseError = `שגיאה (${res.status}): ${errText.slice(0, 120)}`;
         }
         console.warn(`Attempt with ${cleanModel} failed (${res.status}):`, lastResponseError);
+        // If quota exceeded or limit: 0, continue loop to try next model!
       }
     }
 
     if (!response || !response.ok) {
-      const parsedErrMessage = `שגיאת Google Gemini: ${lastResponseError}`;
+      let parsedErrMessage = `שגיאת Google Gemini: ${lastResponseError}`;
+      if (lastResponseError.toLowerCase().includes('quota') || lastResponseError.includes('limit: 0') || lastResponseError.includes('429')) {
+        parsedErrMessage = `שגיאת מכסה של Google Gemini: המודל שנבחר אינו נתמך במכסה החינמית (Limit: 0) או שהושגה מגבלת הקריאות שלו.\n\nאנא עברו למסך ההגדרות (⚙️) ובחרו בדגם Gemini 2.0 Flash או Gemini 1.5 Flash (דגמים אלו מספקים 1,500 שאילתות חינמיות ביום).`;
+      }
       console.warn('All Gemini candidate calls failed:', parsedErrMessage);
 
       return {
         individualId: indi.id,
         individualName: indi.name,
         proposedFields: [],
-        biographicalSummary: `חיפוש הרשת מול Google Gemini לא הושלם בהצלחה.\n\nסיבת השגיאה מהשרת: ${parsedErrMessage}\n\nאנא ודאו את תקינות המפתח בלשונית ההגדרות (⚙️) בפינה העליונה.`,
+        biographicalSummary: `חיפוש הרשת מול Google Gemini לא הושלם בהצלחה.\n\nסיבת השגיאה מהשרת: ${parsedErrMessage}\n\nאנא ודאו את בחירת הדגם בלשונית ההגדרות (⚙️) בפינה העליונה.`,
         historicalContext: '',
         sources: [],
         searchQueriesUsed: queries,
