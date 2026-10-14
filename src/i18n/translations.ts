@@ -231,6 +231,11 @@ export interface Translations {
   clearTreeAction: string;
   saveSettingsAction: string;
   savedAction: string;
+  testApiKeyButton: string;
+  testingApiKey: string;
+  apiKeyValid: (count: number) => string;
+  apiKeyInvalid: string;
+  customModelNote: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -465,6 +470,11 @@ export const translations: Record<Language, Translations> = {
     clearTreeAction: 'נקה עץ מהזיכרון',
     saveSettingsAction: 'שמור הגדרות',
     savedAction: 'נשמר בהצלחה!',
+    testApiKeyButton: 'בדוק תקינות מפתח ובדוק מודלים',
+    testingApiKey: 'בודק מול Google...',
+    apiKeyValid: (count) => `מפתח תקין ומאושר! זוהו ${count} מודלים זמינים מחשבונך.`,
+    apiKeyInvalid: 'שגיאה באימות המפתח',
+    customModelNote: 'רשימת הדגמים נטענת בזמן אמת מחשבונך ב-Google Cloud / AI Studio.',
   },
   en: {
     appName: 'GedcomQuery Pro',
@@ -697,5 +707,10 @@ export const translations: Record<Language, Translations> = {
     clearTreeAction: 'Clear Tree',
     saveSettingsAction: 'Save Settings',
     savedAction: 'Saved!',
+    testApiKeyButton: 'Verify Key & Load Models',
+    testingApiKey: 'Connecting to Google...',
+    apiKeyValid: (count) => `Key verified! Loaded ${count} available models from your account.`,
+    apiKeyInvalid: 'API key validation failed',
+    customModelNote: 'Model options loaded dynamically from your Google AI Studio account.',
   },
 };

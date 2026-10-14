@@ -5,6 +5,19 @@ import { extractYear } from './gedcomParser';
 const API_KEY_STORAGE_KEY = 'gedcomquery_pro_gemini_api_key';
 const MODEL_STORAGE_KEY = 'gedcomquery_pro_gemini_model';
 
+export interface AvailableModel {
+  id: string;
+  displayName: string;
+  description?: string;
+}
+
+export interface ModelTestResult {
+  success: boolean;
+  models: AvailableModel[];
+  bestModel?: string;
+  error?: string;
+}
+
 export function getStoredApiKey(): string {
   return localStorage.getItem(API_KEY_STORAGE_KEY) || '';
 }
@@ -14,27 +27,128 @@ export function setStoredApiKey(key: string): void {
 }
 
 export function getStoredModel(): string {
-  const model = localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.0-flash';
-  if (model === 'gemini-2.5-flash' || !model) {
-    return 'gemini-2.0-flash';
-  }
-  return model;
+  return localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.0-flash';
 }
 
 export function setStoredModel(model: string): void {
-  localStorage.setItem(MODEL_STORAGE_KEY, model.trim());
+  const clean = model.replace(/^models\//, '').trim();
+  localStorage.setItem(MODEL_STORAGE_KEY, clean);
+}
+
+/**
+ * Tests the provided API key against Google ModelService and returns the list of available models.
+ */
+export async function testAndListModels(apiKey: string): Promise<ModelTestResult> {
+  const key = apiKey.trim();
+  if (!key) {
+    return {
+      success: false,
+      models: [],
+      error: 'לא הוזן מפתח API. אנא הזינו מפתח של Google Gemini.',
+    };
+  }
+
+  const endpoints = [
+    `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`,
+    `https://generativelanguage.googleapis.com/v1/models?key=${encodeURIComponent(key)}`,
+  ];
+
+  let lastError = '';
+
+  for (const url of endpoints) {
+    try {
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const data = await resp.json();
+        const rawModels = (data.models || []) as Array<{
+          name: string;
+          displayName?: string;
+          description?: string;
+          supportedGenerationMethods?: string[];
+        }>;
+
+        const supported = rawModels
+          .filter((m) =>
+            m.supportedGenerationMethods
+              ? m.supportedGenerationMethods.includes('generateContent')
+              : true
+          )
+          .map((m) => {
+            const cleanId = m.name.replace(/^models\//, '');
+            return {
+              id: cleanId,
+              displayName: m.displayName || cleanId,
+              description: m.description,
+            };
+          });
+
+        if (supported.length > 0) {
+          const preferredCandidates = [
+            'gemini-2.5-flash',
+            'gemini-2.0-flash',
+            'gemini-2.0-flash-exp',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-flash',
+            'gemini-1.5-pro',
+          ];
+
+          let best = supported.find((m) => preferredCandidates.includes(m.id))?.id;
+          if (!best) {
+            best =
+              supported.find(
+                (m) =>
+                  m.id.includes('flash') &&
+                  !m.id.includes('image') &&
+                  !m.id.includes('embed')
+              )?.id ||
+              supported.find(
+                (m) =>
+                  m.id.includes('pro') &&
+                  !m.id.includes('image') &&
+                  !m.id.includes('embed')
+              )?.id ||
+              supported[0].id;
+          }
+
+          return {
+            success: true,
+            models: supported,
+            bestModel: best,
+          };
+        }
+      } else {
+        const errJson = await resp.json().catch(() => null);
+        lastError = errJson?.error?.message || `שגיאה (${resp.status}): ${resp.statusText}`;
+      }
+    } catch (e: any) {
+      lastError = e?.message || 'שגיאת תקשורת בחיבור ל-Google API';
+    }
+  }
+
+  let userFriendlyError = lastError;
+  if (lastError.toLowerCase().includes('api key not valid')) {
+    userFriendlyError = 'מפתח ה-API אינו תקין (API key not valid). אנא צרו מפתח חינמי ב-Google AI Studio והדביקו אותו כאן.';
+  } else if (lastError.toLowerCase().includes('quota') || lastError.includes('429')) {
+    userFriendlyError = 'חריגה ממגבלת הקריאות (Quota exceeded). אנא המתינו מספר רגעים ונסו שוב.';
+  }
+
+  return {
+    success: false,
+    models: [],
+    error: userFriendlyError || 'לא ניתן היה לאמת את מפתח ה-API מול שרתי Google.',
+  };
 }
 
 /**
  * Conducts web research & historical discovery using Gemini API with Google Search Grounding.
- * Gracefully provides high-quality realistic discovery simulation if no API key is set.
+ * Dynamically queries available models and gracefully falls back if necessary.
  */
 export async function researchIndividual(
   indi: Individual,
   tree: GedcomTree
 ): Promise<ResearchDiscovery> {
   const apiKey = getStoredApiKey();
-  const model = getStoredModel();
+  const currentModel = getStoredModel();
 
   const parents = getParents(tree, indi.id);
   const spouses = getSpouses(tree, indi.id);
@@ -53,6 +167,47 @@ export async function researchIndividual(
     return generateSimulatedDiscovery(indi, queries, parents, spouses);
   }
 
+  // Check models dynamically from Google
+  let candidateModels: string[] = [currentModel];
+  try {
+    const listResult = await testAndListModels(apiKey);
+    if (!listResult.success && listResult.error?.includes('API key not valid')) {
+      return {
+        individualId: indi.id,
+        individualName: indi.name,
+        proposedFields: [],
+        biographicalSummary: `חיפוש הרשת מול Google Gemini לא הושלם בהצלחה.\n\n${listResult.error}\n\nאנא ודאו את תקינות המפתח בלשונית ההגדרות (⚙️) בפינה העליונה.`,
+        historicalContext: '',
+        sources: [],
+        searchQueriesUsed: queries,
+        groundingEnabled: false,
+        generatedAt: new Date().toISOString(),
+        errorMessage: listResult.error,
+      };
+    }
+
+    if (listResult.success && listResult.models.length > 0) {
+      const availableIds = listResult.models.map((m) => m.id);
+      if (availableIds.includes(currentModel)) {
+        candidateModels = [currentModel, ...availableIds.filter((id) => id !== currentModel)];
+      } else if (listResult.bestModel) {
+        candidateModels = [listResult.bestModel, ...availableIds.filter((id) => id !== listResult.bestModel)];
+      } else {
+        candidateModels = availableIds;
+      }
+    }
+  } catch (testErr) {
+    console.warn('Could not test models, continuing with fallback candidate list:', testErr);
+    candidateModels = [
+      currentModel,
+      'gemini-2.0-flash',
+      'gemini-2.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+    ];
+  }
+
   // Live call to Gemini API with Google Search Grounding
   const prompt = `אתה עוזר מחקר גנאלוגי מומחה עם גישה לחיפוש רשת ומידע היסטורי.
 בצע מחקר היסטורי ואימות ארכיוני עבור האדם הבא מתוך עץ המשפחה:
@@ -63,9 +218,9 @@ export async function researchIndividual(
 מקום לידה רשום: ${indi.birthPlace || 'לא ידוע'}
 תאריך פטירה רשום: ${indi.deathDate || 'לא ידוע / בחיים'}
 מקום פטירה רשום: ${indi.deathPlace || 'לא ידוע'}
-הורים ידועים בעץ: ${parents.map(p => p.name).join(', ') || 'אין בעץ'}
-בני/בנות זוג ידועים: ${spouses.map(s => s.spouse.name).join(', ') || 'אין בעץ'}
-ילדים ידועים: ${children.map(c => c.name).join(', ') || 'אין בעץ'}
+הורים ידועים בעץ: ${parents.map((p) => p.name).join(', ') || 'אין בעץ'}
+בני/בנות זוג ידועים: ${spouses.map((s) => s.spouse.name).join(', ') || 'אין בעץ'}
+ילדים ידועים: ${children.map((c) => c.name).join(', ') || 'אין בעץ'}
 הערות קיימות: ${indi.notes.join('; ') || 'אין'}
 
 משימות:
@@ -98,41 +253,17 @@ export async function researchIndividual(
 `;
 
   try {
-    const buildEndpoint = (modelName: string) =>
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    let lastResponseError = '';
+    let response: Response | null = null;
+    let successfulModel = '';
 
-    let activeModel = model;
-    let endpoint = buildEndpoint(activeModel);
+    // Iterate through top candidates
+    for (const testModel of candidateModels.slice(0, 4)) {
+      const cleanModel = testModel.replace(/^models\//, '');
+      const endpointV1beta = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-    // Attempt 1: Call with google_search grounding tool (snake_case per Gemini v1beta schema)
-    let response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ google_search: {} }],
-      }),
-    });
-
-    // If 400 (e.g. google_search tool is rejected on this key/project/tier), retry without the tool
-    if (!response.ok && response.status === 400) {
-      console.warn('Gemini returned 400 with google_search tool, retrying without tool...');
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-        }),
-      });
-    }
-
-    // If 404 (model ID not found), fallback to gemini-1.5-flash
-    if (!response.ok && response.status === 404 && activeModel !== 'gemini-1.5-flash') {
-      activeModel = 'gemini-1.5-flash';
-      endpoint = buildEndpoint(activeModel);
-      console.warn(`Model ${model} returned 404, falling back to ${activeModel}...`);
-
-      response = await fetch(endpoint, {
+      // Attempt A: With google_search grounding tool
+      let res = await fetch(endpointV1beta, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -141,8 +272,10 @@ export async function researchIndividual(
         }),
       });
 
-      if (!response.ok) {
-        response = await fetch(endpoint, {
+      // If 400 (grounding tool rejected on this key/project), retry without tool
+      if (!res.ok && res.status === 400) {
+        console.warn(`Model ${cleanModel} returned 400 with google_search tool, retrying without tool...`);
+        res = await fetch(endpointV1beta, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -150,23 +283,40 @@ export async function researchIndividual(
           }),
         });
       }
-    }
 
-    if (!response.ok) {
-      const errText = await response.text();
-      let parsedErrMessage = `שגיאת Gemini API (קוד ${response.status})`;
-      try {
-        const errJson = JSON.parse(errText);
-        if (errJson.error?.message) {
-          parsedErrMessage = `שגיאת Google Gemini (${response.status}): ${errJson.error.message}`;
-        }
-      } catch {
-        parsedErrMessage = `שגיאת תקשורת עם Gemini (${response.status}): ${errText.slice(0, 120)}`;
+      // If 404 on v1beta, try v1 endpoint
+      if (!res.ok && res.status === 404) {
+        const endpointV1 = `https://generativelanguage.googleapis.com/v1/models/${encodeURIComponent(cleanModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        res = await fetch(endpointV1, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+          }),
+        });
       }
 
-      console.warn('Gemini API call failed:', parsedErrMessage);
+      if (res.ok) {
+        response = res;
+        successfulModel = cleanModel;
+        setStoredModel(cleanModel);
+        break;
+      } else {
+        const errText = await res.text();
+        try {
+          const errJson = JSON.parse(errText);
+          lastResponseError = errJson.error?.message || `שגיאה (${res.status})`;
+        } catch {
+          lastResponseError = `שגיאה (${res.status}): ${errText.slice(0, 120)}`;
+        }
+        console.warn(`Attempt with ${cleanModel} failed (${res.status}):`, lastResponseError);
+      }
+    }
 
-      // Return informative discovery with error message banner
+    if (!response || !response.ok) {
+      const parsedErrMessage = `שגיאת Google Gemini: ${lastResponseError}`;
+      console.warn('All Gemini candidate calls failed:', parsedErrMessage);
+
       return {
         individualId: indi.id,
         individualName: indi.name,
