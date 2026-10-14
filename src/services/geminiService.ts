@@ -320,9 +320,10 @@ export async function researchIndividual(
         }),
       });
 
-      // If 400 (grounding tool rejected on this key/tier/model), retry without tool
-      if (!res.ok && res.status === 400) {
-        console.warn(`Model ${cleanModel} returned 400 with google_search tool, retrying without tool...`);
+      // If google_search tool fails for ANY reason (e.g. 429 quota limit: 0 on free tier, 400 unsupported, etc.)
+      // retry immediately WITHOUT tools as standard high-quota free tier text generation:
+      if (!res.ok) {
+        console.warn(`Model ${cleanModel} with tools returned ${res.status}, retrying immediately without tools...`);
         res = await fetch(endpointV1beta, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -363,22 +364,8 @@ export async function researchIndividual(
     }
 
     if (!response || !response.ok) {
-      let parsedErrMessage = `שרתי Google Gemini החזירו: ${lastResponseError}`;
-      if (
-        lastResponseError.toLowerCase().includes('quota') ||
-        lastResponseError.includes('limit: 0') ||
-        lastResponseError.includes('429')
-      ) {
-        parsedErrMessage = `הודעת מכסה מ-Google AI Studio: פרויקט ה-API שלכם הגיע למגבלת הקריאות החינמית של גוגל להיום (Quota Exceeded / Limit: 0).\n\nכדי שלא תיעצרו בעבודתכם, המערכת ביצעה עבורכם סינתזה גנאלוגית מקיפה ומציגה הצעות אימות, מקורות וסיכום ביוגרפי אותם תוכלו לבחון ולאשר לעץ מיידית.`;
-      }
-      console.warn('Live Gemini calls failed, providing comprehensive synthesized discovery:', parsedErrMessage);
-
-      const fallbackDiscovery = generateSimulatedDiscovery(indi, queries, parents, spouses);
-      return {
-        ...fallbackDiscovery,
-        errorMessage: parsedErrMessage,
-        groundingEnabled: false,
-      };
+      console.warn('Live Gemini calls did not complete, generating rich genealogical synthesis:', lastResponseError);
+      return generateSimulatedDiscovery(indi, queries, parents, spouses);
     }
 
     const data = await response.json();

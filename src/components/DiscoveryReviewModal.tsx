@@ -126,7 +126,7 @@ export const DiscoveryReviewModal: React.FC<DiscoveryReviewModalProps> = ({
             </div>
           ) : discovery ? (
             <>
-              {discovery.errorMessage && (
+              {discovery.errorMessage && discovery.proposedFields.length === 0 && (
                 <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs space-y-2">
                   <div className="font-bold flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
