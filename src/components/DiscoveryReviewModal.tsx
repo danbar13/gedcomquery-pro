@@ -146,7 +146,7 @@ export const DiscoveryReviewModal: React.FC<DiscoveryReviewModalProps> = ({
                       </button>
                     )}
                   </div>
-                  <p className="font-mono text-[11px] bg-white/70 dark:bg-black/30 p-2 rounded-lg border border-amber-200 dark:border-amber-900 leading-relaxed">
+                  <p className="font-sans text-[11px] bg-white/70 dark:bg-black/30 p-2.5 rounded-lg border border-amber-200 dark:border-amber-900 leading-relaxed whitespace-pre-line">
                     {discovery.errorMessage}
                   </p>
                 </div>
