@@ -87,6 +87,8 @@ export interface ResearchDiscovery {
   searchQueriesUsed: string[];
   groundingEnabled: boolean;
   generatedAt: string;
+  errorMessage?: string;
+  statusNote?: string;
 }
 
 export interface KinshipResult {

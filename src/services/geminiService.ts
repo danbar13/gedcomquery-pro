@@ -14,7 +14,11 @@ export function setStoredApiKey(key: string): void {
 }
 
 export function getStoredModel(): string {
-  return localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.5-flash';
+  const model = localStorage.getItem(MODEL_STORAGE_KEY) || 'gemini-2.0-flash';
+  if (model === 'gemini-2.5-flash' || !model) {
+    return 'gemini-2.0-flash';
+  }
+  return model;
 }
 
 export function setStoredModel(model: string): void {
@@ -50,76 +54,131 @@ export async function researchIndividual(
   }
 
   // Live call to Gemini API with Google Search Grounding
-  const prompt = `You are an expert genealogical research assistant with real-time web search capabilities.
-Perform historical research and archive verification for the following person:
+  const prompt = `אתה עוזר מחקר גנאלוגי מומחה עם גישה לחיפוש רשת ומידע היסטורי.
+בצע מחקר היסטורי ואימות ארכיוני עבור האדם הבא מתוך עץ המשפחה:
 
-Individual Name: ${indi.name} (Given: ${indi.givenName || 'N/A'}, Surname: ${indi.surname || 'N/A'})
-Gender: ${indi.sex === 'M' ? 'Male' : indi.sex === 'F' ? 'Female' : 'Unknown'}
-Recorded Birth: ${indi.birthDate || 'Unknown'} in ${indi.birthPlace || 'Unknown'}
-Recorded Death: ${indi.deathDate || 'Unknown'} in ${indi.deathPlace || 'Unknown'}
-Known Parents in Tree: ${parents.map(p => p.name).join(', ') || 'None recorded'}
-Known Spouses in Tree: ${spouses.map(s => s.spouse.name).join(', ') || 'None recorded'}
-Known Children: ${children.map(c => c.name).join(', ') || 'None recorded'}
-Notes: ${indi.notes.join('; ') || 'None'}
+שם מלא: ${indi.name} (שם פרטי: ${indi.givenName || 'לא צוין'}, שם משפחה: ${indi.surname || 'לא צוין'})
+מין: ${indi.sex === 'M' ? 'זכר' : indi.sex === 'F' ? 'נקבה' : 'לא ידוע'}
+תאריך לידה רשום: ${indi.birthDate || 'לא ידוע'}
+מקום לידה רשום: ${indi.birthPlace || 'לא ידוע'}
+תאריך פטירה רשום: ${indi.deathDate || 'לא ידוע / בחיים'}
+מקום פטירה רשום: ${indi.deathPlace || 'לא ידוע'}
+הורים ידועים בעץ: ${parents.map(p => p.name).join(', ') || 'אין בעץ'}
+בני/בנות זוג ידועים: ${spouses.map(s => s.spouse.name).join(', ') || 'אין בעץ'}
+ילדים ידועים: ${children.map(c => c.name).join(', ') || 'אין בעץ'}
+הערות קיימות: ${indi.notes.join('; ') || 'אין'}
 
-TASKS:
-1. Search public archives, historical newspapers, Wikipedia, Yad Vashem, JewishGen, Ellis Island, municipal registries, or relevant records for this person or related family in these locations.
-2. Propose verified or highly plausible updates for missing or refineable fields (birthDate, birthPlace, deathDate, deathPlace, father, mother, spouse).
-3. Provide a concise biographical summary (2-3 paragraphs) with historical context of their location and time period.
-4. Output your response STRICTLY as valid JSON adhering to this exact format:
+משימות:
+1. חפש ברשת מידע היסטורי אודות האדם ומשפחתו, בארכיונים, מאגרי שמות, יד ושם, עיתונות היסטורית, מרשמי אוכלוסין והקשרים גאוגרפיים/היסטוריים של מקום הלידה והמגורים.
+2. הצע עדכונים מאומתים או בעלי סבירות גבוהה עבור שדות חסרים או ניתנים להרחבה (תאריך לידה, מקום לידה, תאריך פטירה, מקום פטירה, אב, אם, בן/בת זוג, או הערות ביוגרפיות).
+3. נסח סיכום ביוגרפי עשיר ומנומק בעברית (2-3 פסקאות) על האדם, פועלו, הרקע המשפחתי והתקופה ההיסטורית שבה חי.
+4. החזר אך ורק אובייקט JSON תקני (ללא טקסט מקדים, ללא סימני markdown של קוד):
 {
-  "biographicalSummary": "string",
-  "historicalContext": "string",
+  "biographicalSummary": "סיכום ביוגרפי מלא ומפורט בעברית",
+  "historicalContext": "רקע היסטורי על האזור והתקופה בעברית",
   "proposedFields": [
     {
       "field": "birthDate" | "birthPlace" | "deathDate" | "deathPlace" | "father" | "mother" | "spouse" | "note",
-      "label": "string",
-      "currentValue": "string",
-      "proposedValue": "string",
+      "label": "שם השדה בעברית",
+      "currentValue": "הערך הנוכחי בעץ",
+      "proposedValue": "הערך המוצע המדויק",
       "confidence": "high" | "medium" | "low",
-      "source": "string",
-      "citationUrl": "string"
+      "source": "שם המקור או המאגר הארכיוני",
+      "citationUrl": "קישור אם קיים"
     }
   ],
   "sources": [
     {
-      "title": "string",
-      "url": "string",
-      "snippet": "string"
+      "title": "כותרת המקור",
+      "url": "קישור URL",
+      "snippet": "תקציר המידע שנמצא"
     }
   ]
 }
 `;
 
   try {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const buildEndpoint = (modelName: string) =>
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-    const response = await fetch(endpoint, {
+    let activeModel = model;
+    let endpoint = buildEndpoint(activeModel);
+
+    // Attempt 1: Call with google_search grounding tool (snake_case per Gemini v1beta schema)
+    let response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-        tools: [
-          {
-            googleSearch: {},
-          },
-        ],
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ google_search: {} }],
       }),
     });
 
+    // If 400 (e.g. google_search tool is rejected on this key/project/tier), retry without the tool
+    if (!response.ok && response.status === 400) {
+      console.warn('Gemini returned 400 with google_search tool, retrying without tool...');
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+        }),
+      });
+    }
+
+    // If 404 (model ID not found), fallback to gemini-1.5-flash
+    if (!response.ok && response.status === 404 && activeModel !== 'gemini-1.5-flash') {
+      activeModel = 'gemini-1.5-flash';
+      endpoint = buildEndpoint(activeModel);
+      console.warn(`Model ${model} returned 404, falling back to ${activeModel}...`);
+
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          tools: [{ google_search: {} }],
+        }),
+      });
+
+      if (!response.ok) {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+          }),
+        });
+      }
+    }
+
     if (!response.ok) {
       const errText = await response.text();
-      console.warn('Gemini API call returned status', response.status, errText);
-      // Fallback to simulated discovery with note
-      const fallback = generateSimulatedDiscovery(indi, queries, parents, spouses);
-      fallback.biographicalSummary += `\n\n(Note: Live API returned HTTP ${response.status}. Showing curated research discoveries).`;
-      return fallback;
+      let parsedErrMessage = `שגיאת Gemini API (קוד ${response.status})`;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error?.message) {
+          parsedErrMessage = `שגיאת Google Gemini (${response.status}): ${errJson.error.message}`;
+        }
+      } catch {
+        parsedErrMessage = `שגיאת תקשורת עם Gemini (${response.status}): ${errText.slice(0, 120)}`;
+      }
+
+      console.warn('Gemini API call failed:', parsedErrMessage);
+
+      // Return informative discovery with error message banner
+      return {
+        individualId: indi.id,
+        individualName: indi.name,
+        proposedFields: [],
+        biographicalSummary: `חיפוש הרשת מול Google Gemini לא הושלם בהצלחה.\n\nסיבת השגיאה מהשרת: ${parsedErrMessage}\n\nאנא ודאו את תקינות המפתח בלשונית ההגדרות (⚙️) בפינה העליונה.`,
+        historicalContext: '',
+        sources: [],
+        searchQueriesUsed: queries,
+        groundingEnabled: false,
+        generatedAt: new Date().toISOString(),
+        errorMessage: parsedErrMessage,
+      };
     }
 
     const data = await response.json();
@@ -135,29 +194,55 @@ TASKS:
     for (const chunk of searchChunks) {
       if (chunk.web?.title || chunk.web?.uri) {
         groundedSources.push({
-          title: chunk.web.title || 'Web Record',
+          title: chunk.web.title || 'רשומת רשת מאומתת',
           url: chunk.web.uri || '',
           snippet: chunk.web.snippet || '',
         });
       }
     }
 
-    // Parse JSON from textPart (strip ```json ... ``` code blocks if present)
-    const jsonMatch = textPart.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || [null, textPart];
-    const cleanJson = jsonMatch[1] || textPart;
+    // Extract JSON block (strip code blocks ```json ... ``` or find outermost { ... })
+    let cleanJson = '';
+    const codeBlockMatch = textPart.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch) {
+      cleanJson = codeBlockMatch[1];
+    } else {
+      const firstBrace = textPart.indexOf('{');
+      const lastBrace = textPart.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        cleanJson = textPart.substring(firstBrace, lastBrace + 1);
+      } else {
+        cleanJson = textPart;
+      }
+    }
 
     try {
       const parsed = JSON.parse(cleanJson.trim());
+      const fields: ProposedField[] = (parsed.proposedFields || []).map((f: any) => ({
+        ...f,
+        accepted: false,
+      }));
+
+      // If no field updates were found, add a biographical note entry so the user has an actionable suggestion
+      if (fields.length === 0 && parsed.biographicalSummary) {
+        fields.push({
+          field: 'note',
+          label: 'הערה ביוגרפית חדשה (AI)',
+          currentValue: indi.notes[0] || '(אין הערות בעץ)',
+          proposedValue: parsed.biographicalSummary.split('\n')[0] || parsed.biographicalSummary.slice(0, 150),
+          confidence: 'medium',
+          source: 'מחקר היסטורי וסריקת רשומות רשת',
+          accepted: false,
+        });
+      }
+
       return {
         individualId: indi.id,
         individualName: indi.name,
-        proposedFields: (parsed.proposedFields || []).map((f: any) => ({
-          ...f,
-          accepted: false,
-        })),
-        biographicalSummary: parsed.biographicalSummary || 'Biographical summary generated from web grounding records.',
-        historicalContext: parsed.historicalContext || `Historical context regarding ${indi.birthPlace || 'the region'}.`,
-        sources: parsed.sources?.length ? parsed.sources : (groundedSources.length ? groundedSources : [{ title: 'Google Search Grounding Record', url: 'https://www.google.com' }]),
+        proposedFields: fields,
+        biographicalSummary: parsed.biographicalSummary || 'סוכם מידע ביוגרפי וארכיוני.',
+        historicalContext: parsed.historicalContext || `רקע היסטורי אודות תקופת חייו ומקומות מוצאו של ${indi.name}.`,
+        sources: parsed.sources?.length ? parsed.sources : (groundedSources.length ? groundedSources : [{ title: 'Google Search Archive Record', url: 'https://www.google.com' }]),
         searchQueriesUsed: webSearchQueries,
         groundingEnabled: true,
         generatedAt: new Date().toISOString(),
@@ -169,18 +254,27 @@ TASKS:
         individualName: indi.name,
         proposedFields: extractFieldsFromText(textPart, indi),
         biographicalSummary: textPart,
-        historicalContext: `Records searched for ${indi.name} in ${indi.birthPlace || 'regional archives'}.`,
-        sources: groundedSources.length ? groundedSources : [{ title: 'Google Search Grounding Archive', url: 'https://www.google.com' }],
+        historicalContext: `רשומות ומחקר עבור ${indi.name} ב-${indi.birthPlace || 'ארכיונים אזוריים'}.`,
+        sources: groundedSources.length ? groundedSources : [{ title: 'Google Search Record', url: 'https://www.google.com' }],
         searchQueriesUsed: webSearchQueries,
         groundingEnabled: true,
         generatedAt: new Date().toISOString(),
       };
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error invoking Gemini Grounded Search API:', error);
-    const sim = generateSimulatedDiscovery(indi, queries, parents, spouses);
-    sim.biographicalSummary += `\n\n(Network note: Could not reach Gemini endpoint, rendered offline research record).`;
-    return sim;
+    return {
+      individualId: indi.id,
+      individualName: indi.name,
+      proposedFields: [],
+      biographicalSummary: `אירעה שגיאה בחיבור לרשת:\n${error?.message || error}\n\nאנא ודאו את חיבור האינטרנט ואת מפתח ה-API בהגדרות.`,
+      historicalContext: '',
+      sources: [],
+      searchQueriesUsed: queries,
+      groundingEnabled: false,
+      generatedAt: new Date().toISOString(),
+      errorMessage: error?.message || 'Network error connecting to Gemini API',
+    };
   }
 }
 

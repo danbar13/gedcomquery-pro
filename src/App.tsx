@@ -827,6 +827,7 @@ export function App() {
           person={researchingPerson}
           onAcceptField={handleAcceptDiscoveryField}
           onAcceptAll={handleAcceptAllDiscoveryFields}
+          onOpenSettings={() => setIsSettingsOpen(true)}
         />
       )}
 

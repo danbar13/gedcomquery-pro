@@ -32,7 +32,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   if (!isOpen) return null;
 
   const [apiKey, setApiKey] = useState('');
-  const [model, setModel] = useState('gemini-2.5-flash');
+  const [model, setModel] = useState('gemini-2.0-flash');
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -120,9 +120,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onChange={(e) => setModel(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
-              <option value="gemini-2.5-flash">Gemini 2.5 Flash (מומלץ - מהיר ומעוגן)</option>
-              <option value="gemini-1.5-flash">Gemini 1.5 Flash (יעיל ומהיר)</option>
-              <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              <option value="gemini-2.0-flash">Gemini 2.0 Flash (מומלץ - מהיר עם חיפוש רשת חי)</option>
+              <option value="gemini-1.5-flash">Gemini 1.5 Flash (יציב ויעיל)</option>
               <option value="gemini-1.5-pro">Gemini 1.5 Pro (הסקה עמוקה ומורכבת)</option>
             </select>
           </div>

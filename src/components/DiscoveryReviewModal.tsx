@@ -8,6 +8,8 @@ import {
   Globe,
   Loader2,
   BookOpen,
+  AlertTriangle,
+  Settings,
 } from 'lucide-react';
 import { Individual, ResearchDiscovery, ProposedField } from '../types/gedcom';
 import { useLanguage } from '../context/LanguageContext';
@@ -20,6 +22,7 @@ interface DiscoveryReviewModalProps {
   person: Individual | null;
   onAcceptField: (field: ProposedField) => void;
   onAcceptAll: (fields: ProposedField[]) => void;
+  onOpenSettings?: () => void;
 }
 
 export const DiscoveryReviewModal: React.FC<DiscoveryReviewModalProps> = ({
@@ -30,6 +33,7 @@ export const DiscoveryReviewModal: React.FC<DiscoveryReviewModalProps> = ({
   person,
   onAcceptField,
   onAcceptAll,
+  onOpenSettings,
 }) => {
   const { t, lang } = useLanguage();
   if (!isOpen) return null;
@@ -122,6 +126,32 @@ export const DiscoveryReviewModal: React.FC<DiscoveryReviewModalProps> = ({
             </div>
           ) : discovery ? (
             <>
+              {discovery.errorMessage && (
+                <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs space-y-2">
+                  <div className="font-bold flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <span>התקבלה הודעת מערכת מ-Google Gemini:</span>
+                    </span>
+                    {onOpenSettings && (
+                      <button
+                        onClick={() => {
+                          onClose();
+                          onOpenSettings();
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 font-bold text-[11px] hover:bg-amber-300 transition-colors cursor-pointer"
+                      >
+                        <Settings className="w-3 h-3" />
+                        <span>בדיקת מפתח בהגדרות</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="font-mono text-[11px] bg-white/70 dark:bg-black/30 p-2 rounded-lg border border-amber-200 dark:border-amber-900 leading-relaxed">
+                    {discovery.errorMessage}
+                  </p>
+                </div>
+              )}
+
               {/* Diff Comparison Table */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
